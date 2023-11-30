@@ -4,10 +4,33 @@ author: "Yaduo Wang"
 date: "2023-11-29"
 output: github_document
 ---
-```{r}
+```{r message=FALSE, warning=FALSE}
 library(tidyverse)
 library(modelr)
 library(mgcv)
+```
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(viridis)
+
+knitr::opts_chunk$set(
+	echo = TRUE,
+	warning = FALSE,
+	fig.width = 8, 
+  fig.height = 6,
+  out.width = "90%"
+)
+
+options(
+  ggplot2.continuous.colour = "viridis",
+  ggplot2.continuous.fill = "viridis"
+)
+
+scale_colour_discrete = scale_colour_viridis_d
+scale_fill_discrete = scale_fill_viridis_d
+
+theme_set(theme_minimal() + theme(legend.position = "bottom"))
 ```
 
 ## Problem 2
@@ -32,6 +55,7 @@ weather_df =
 birthweight <- read.csv("DATA/birthweight.csv")
 birthweight = 
   birthweight |> 
+#convert numeric to factor
   mutate(
     babysex = as.factor(babysex),
     frace = as.factor(frace),
@@ -42,12 +66,18 @@ birthweight =
 colSums(is.na(birthweight))
 ```
 
+After we loading the data, and convert some numeric variables to factor variables as necessary, we check whether there exist missing values. As shown in the results, there is no missing values in each variable. 
+
 ```{r}
+#Propose a regression model for birth weight with all variables as predictor. 
 fit_all = lm(bwt ~., data = birthweight)
 summary(fit_all)
 ```
 
+Select predictors that is significant with small p-value from the summary of the model shown above.
+
 ```{r}
+# Fit more accurate model. 
 fit_selected = lm(bwt ~ babysex + bhead + 
                     blength + delwt + gaweeks +
                     smoken, 
@@ -75,12 +105,15 @@ cv_df =
   mutate(
     train = map(train, as_tibble),
     test = map(test, as_tibble))
+
 cv_df = 
   cv_df |> 
   mutate(
-    my_model = map(train, \(df) lm(bwt ~ babysex + bhead + 
+    mine_model = map(train, \(df) lm(bwt ~ babysex + bhead + 
                   blength + delwt + gaweeks + smoken, data = df)),
+# One using length at birth and gestational age as predictors (main effects only)
     main_effect_mod  = map(train, \(df) lm(bwt ~ blength + gaweeks, data = df)),
+# One using head circumference, length, sex, and all interactions (including the three-way interaction) between these.
     interaction_mod     = map(train, \(df) lm(bwt ~ bhead + blength + babysex + 
                                         bhead*blength +
                                         bhead*babysex +
@@ -88,7 +121,7 @@ cv_df =
                                         bhead * blength * babysex, data = df))
    ) |> 
   mutate(
-    rmse_my = map2_dbl(my_model, test, \(mod, df) rmse(model = mod, data = df)),
+    rmse_mine = map2_dbl(mine_model, test, \(mod, df) rmse(model = mod, data = df)),
     rmse_main = map2_dbl(main_effect_mod, test, \(mod, df) rmse(model = mod, data = df)),
     rmse_interaction = map2_dbl(interaction_mod, test, \(mod, df) rmse(model = mod, data = df)))
 ```
@@ -108,4 +141,6 @@ cv_df |>
        title = "Models vs. RMSE")
   
 ```
+
+From the plot, we can see that our original model has the lowest RMSE, so we think that our model might be better compared to other two models in our senarios. 
 
