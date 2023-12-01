@@ -11,6 +11,7 @@ library(mgcv)
 ```
 
 ```{r setup, include=FALSE}
+# general settings
 library(tidyverse)
 library(viridis)
 
@@ -34,7 +35,7 @@ theme_set(theme_minimal() + theme(legend.position = "bottom"))
 ```
 
 ## Problem 2
-```{r}
+```{r warning=FALSE}
 # download the data
 weather_df = 
   rnoaa::meteo_pull_monitors(
@@ -47,6 +48,67 @@ weather_df =
     tmin = tmin / 10,
     tmax = tmax / 10) |>
   select(name, id, everything())
+```
+
+
+```{r warning=FALSE}
+# use the bootstrap to examine the distribution under repeated sampling
+boot_straps = weather_df|> 
+  modelr::bootstrap(n = 5000, id = "ID") |> 
+  mutate(
+    models = map(strap, \(df) lm(tmax ~ tmin + prcp, data = df) ),
+    results_estimate = map(models, broom::tidy),
+    extr_r = map(models, broom::glance)) |> 
+  select(-strap, -models) 
+
+# produce estimates of log of product of beta and r-squared
+
+beta_calculated = boot_straps |> 
+  unnest(results_estimate) |> 
+  group_by(ID) |> 
+  summarize(product = prod(estimate)) |> 
+  mutate(log_product = log(product))
+
+r_square = boot_straps |> 
+  unnest(extr_r) |> 
+  group_by(ID) |> 
+  summarize(r_squared = mean(r.squared))
+```
+
+```{r}
+#combine the calculated values
+bootstrap_results_r_q_beta = left_join(beta_calculated, r_square, by = "ID")
+
+# identify the 2.5% and 97.5% quantiles to provide a 95% confidence interval 
+log_product_beta_ci = bootstrap_results_r_q_beta |> 
+  summarize(
+    ci_lower = quantile(log_product, 0.025, na.rm = TRUE),
+    ci_upper = quantile(log_product, 0.975, na.rm = TRUE)
+  )
+
+r_square_ci = bootstrap_results_r_q_beta |> 
+  summarize(
+    ci_lower = quantile(r_squared, 0.025, na.rm = TRUE),
+    ci_upper = quantile(r_squared, 0.975, na.rm = TRUE)
+  )
+```
+
+```{r}
+# Plot for r_squared distribution
+bootstrap_results_r_q_beta |> 
+  ggplot(aes(x = r_squared)) +
+  geom_histogram(fill = "lightblue",color = "black") +
+  theme_minimal() +
+  labs(x = "r_squared", y = "Frequency", 
+       title = "Distribution of R_squared")
+
+# Plot for log of product beta distribution
+bootstrap_results_r_q_beta |>
+  ggplot(aes(x = log_product)) +
+  geom_histogram(fill = "lightgreen", color = "black") +
+  theme_minimal() +
+  labs(x = "Log of Product Beta", y = "Frequency", 
+       title = "Distribution of Log of Product Beta", )
 ```
 
 ## Problem 3
@@ -143,4 +205,68 @@ cv_df |>
 ```
 
 From the plot, we can see that our original model has the lowest RMSE, so we think that our model might be better compared to other two models in our senarios. 
+
+## Problem 1 Solutions
+```{r q1_data_cleaning}
+homicide_df = 
+  read_csv("DATA/homicide-data.csv", na = c("", "NA", "Unknown")) |> 
+  mutate(
+    city_state = str_c(city, state, sep = ", "),
+    victim_age = as.numeric(victim_age),
+    resolution = case_when(
+      disposition == "Closed without arrest" ~ 0,
+      disposition == "Open/No arrest"        ~ 0,
+      disposition == "Closed by arrest"      ~ 1)
+  ) |> 
+  filter(victim_race %in% c("White", "Black")) |> 
+  filter(!(city_state %in% c("Tulsa, AL", "Dallas, TX", "Phoenix, AZ", "Kansas City, MO"))) |> 
+  select(city_state, resolution, victim_age, victim_sex, victim_race)
+```
+
+```{r q1_glm_baltimore}
+baltimore_glm = 
+  filter(homicide_df, city_state == "Baltimore, MD") |> 
+  glm(resolution ~ victim_age + victim_sex + victim_race, family = binomial(), data = _)
+
+baltimore_glm |> 
+  broom::tidy() |> 
+  mutate(
+    OR = exp(estimate), 
+    OR_CI_upper = exp(estimate + 1.96 * std.error),
+    OR_CI_lower = exp(estimate - 1.96 * std.error)) |> 
+  filter(term == "victim_sexMale") |> 
+  select(OR, OR_CI_lower, OR_CI_upper) |>
+  knitr::kable(digits = 3)
+```
+
+```{r q1_glm_all_cities}
+model_results = 
+  homicide_df |> 
+  nest(data = -city_state) |> 
+  mutate(
+    models = map(data, \(df) glm(resolution ~ victim_age + victim_sex + victim_race, 
+                             family = binomial(), data = df)),
+    tidy_models = map(models, broom::tidy)) |> 
+  select(-models, -data) |> 
+  unnest(cols = tidy_models) |> 
+  mutate(
+    OR = exp(estimate), 
+    OR_CI_upper = exp(estimate + 1.96 * std.error),
+    OR_CI_lower = exp(estimate - 1.96 * std.error)) |> 
+  filter(term == "victim_sexMale") |> 
+  select(city_state, OR, OR_CI_lower, OR_CI_upper)
+
+model_results |>
+  slice(1:5) |> 
+  knitr::kable(digits = 3)
+```
+
+```{r q1_plot}
+model_results |> 
+  mutate(city_state = fct_reorder(city_state, OR)) |> 
+  ggplot(aes(x = city_state, y = OR)) + 
+  geom_point() + 
+  geom_errorbar(aes(ymin = OR_CI_lower, ymax = OR_CI_upper)) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
 
