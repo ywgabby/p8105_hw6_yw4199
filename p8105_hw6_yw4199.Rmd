@@ -17,12 +17,12 @@ library(viridis)
 
 knitr::opts_chunk$set(
 	echo = TRUE,
+	fig.height = 6,
+	fig.width = 8,
+	message = FALSE,
 	warning = FALSE,
-	fig.width = 8, 
-  fig.height = 6,
-  out.width = "90%"
+	out.width = "90%"
 )
-
 options(
   ggplot2.continuous.colour = "viridis",
   ggplot2.continuous.fill = "viridis"
@@ -56,13 +56,12 @@ weather_df =
 boot_straps = weather_df|> 
   modelr::bootstrap(n = 5000, id = "ID") |> 
   mutate(
-    models = map(strap, \(df) lm(tmax ~ tmin + prcp, data = df) ),
+    models = map(strap, \(df) lm(tmax ~ tmin + prcp, data = df)),
     results_estimate = map(models, broom::tidy),
     extr_r = map(models, broom::glance)) |> 
   select(-strap, -models) 
 
 # produce estimates of log of product of beta and r-squared
-
 beta_calculated = boot_straps |> 
   unnest(results_estimate) |> 
   group_by(ID) |> 
@@ -76,17 +75,13 @@ r_square = boot_straps |>
 ```
 
 ```{r}
-#combine the calculated values
-bootstrap_results_r_q_beta = left_join(beta_calculated, r_square, by = "ID")
-
 # identify the 2.5% and 97.5% quantiles to provide a 95% confidence interval 
-log_product_beta_ci = bootstrap_results_r_q_beta |> 
+log_product_beta_ci = beta_calculated |> 
   summarize(
     ci_lower = quantile(log_product, 0.025, na.rm = TRUE),
     ci_upper = quantile(log_product, 0.975, na.rm = TRUE)
   )
-
-r_square_ci = bootstrap_results_r_q_beta |> 
+r_square_ci = r_square |> 
   summarize(
     ci_lower = quantile(r_squared, 0.025, na.rm = TRUE),
     ci_upper = quantile(r_squared, 0.975, na.rm = TRUE)
@@ -94,22 +89,24 @@ r_square_ci = bootstrap_results_r_q_beta |>
 ```
 
 ```{r}
+# Plot for log of product beta distribution
+beta_calculated |>
+  ggplot(aes(x = log_product)) +
+  geom_histogram(fill = "lightgreen", color = "black") +
+  theme_minimal() +
+  labs(x = "Log of Product Beta", y = "Frequency", 
+       title = "Distribution of Log of Product Beta")
+
 # Plot for r_squared distribution
-bootstrap_results_r_q_beta |> 
+r_square |> 
   ggplot(aes(x = r_squared)) +
   geom_histogram(fill = "lightblue",color = "black") +
   theme_minimal() +
   labs(x = "r_squared", y = "Frequency", 
        title = "Distribution of R_squared")
-
-# Plot for log of product beta distribution
-bootstrap_results_r_q_beta |>
-  ggplot(aes(x = log_product)) +
-  geom_histogram(fill = "lightgreen", color = "black") +
-  theme_minimal() +
-  labs(x = "Log of Product Beta", y = "Frequency", 
-       title = "Distribution of Log of Product Beta", )
 ```
+
+The distribution of the log of the product of the beta shows that most values are centered around -2.5 to -3.25. The distribution is left skewed and this feature might be related to the outliers in the bootstrap sample. The distribution of the r-squared is more normally distributed and the values are centered around 0.92. 
 
 ## Problem 3
 ```{r}
